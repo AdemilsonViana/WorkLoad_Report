@@ -5,3 +5,4 @@ pyodbc>=5.0.0
 python-dateutil>=2.8.0
 pytz>=2025.0
 notion-client>=2.2.1
+plotly>=5.18.0

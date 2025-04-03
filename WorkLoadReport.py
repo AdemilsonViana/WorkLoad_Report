@@ -4,6 +4,7 @@
 from Functions.API_Notion import API_Notion
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 # %% ------------------------------------------------------------------------------------------
 # streamlit setup
@@ -128,6 +129,12 @@ def format_time(td):
 # Adicionar filtros no sidebar
 st.sidebar.header('Filtros')
 
+# Adicionar seletor de período
+time_period = st.sidebar.selectbox(
+    'Agrupar por',
+    ['date', 'week', 'month', 'year']
+)
+
 # Obter valores únicos para os filtros
 years = sorted(pivot_table.index.get_level_values('year').unique())
 months = sorted(pivot_table.index.get_level_values('month').unique())
@@ -151,6 +158,14 @@ if selected_week != 'Todos':
 # Remover a última linha (total) antes de mostrar
 filtered_table_display = filtered_table.iloc[:-1] if len(filtered_table) > 1 else filtered_table
 
+# níveis do índice em função do período selecionado
+if time_period == 'year':
+    filtered_table_display = filtered_table_display.groupby(level='year').sum()
+elif time_period == 'month':
+    filtered_table_display = filtered_table_display.groupby(level=['year', 'month']).sum()
+elif time_period == 'week':
+    filtered_table_display = filtered_table_display.groupby(level=['year', 'month', 'week']).sum()
+
 # Mostrar totais dos dados filtrados
 if len(filtered_table) > 0:
     col1, col2, col3, col4 = st.columns(4)
@@ -171,12 +186,13 @@ if len(filtered_table) > 0:
         total_workload = study_total + work_total + workout_total
         st.metric("Total Workload", format_time(total_workload))
 
-    # Formatar a tabela para exibição
+# Formatar a tabela para exibição
 formatted_table = filtered_table_display.copy()
 for col in formatted_table.columns:
     formatted_table[col] = formatted_table[col].apply(format_time)
 
 # Mostrar a tabela filtrada
+st.subheader('Tabela Detalhada')
 st.dataframe(
     formatted_table,
     use_container_width=True,
