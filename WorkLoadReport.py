@@ -162,9 +162,9 @@ filtered_table_display = filtered_table.iloc[:-1] if len(filtered_table) > 1 els
 if time_period == 'year':
     filtered_table_display = filtered_table_display.groupby(level='year').sum()
 elif time_period == 'month':
-    filtered_table_display = filtered_table_display.groupby(level=['year', 'month']).sum()
+    filtered_table_display = filtered_table_display.groupby(level=['month']).sum()
 elif time_period == 'week':
-    filtered_table_display = filtered_table_display.groupby(level=['year', 'month', 'week']).sum()
+    filtered_table_display = filtered_table_display.groupby(level=['week']).sum()
 
 # Mostrar totais dos dados filtrados
 if len(filtered_table) > 0:
