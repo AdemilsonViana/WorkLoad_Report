@@ -24,6 +24,7 @@ urls = {
 
 # %% ------------------------------------------------------------------------------------------
 # função para extrair dados do Notion
+@st.cache_data(ttl=300)  # Cache por 5 minutos
 def api_notion_iterativa():
     dados = {}
     for calendar_type, config in urls.items():
@@ -32,6 +33,17 @@ def api_notion_iterativa():
         dados[calendar_type] = df_temp
     
     return dados
+
+# %% ------------------------------------------------------------------------------------------
+# streamlit
+st.title('Work Load Report')
+
+# Adicionar botão de atualização
+if st.button('🔄 Atualizar Dados'):
+    st.cache_data.clear()
+    st.experimental_rerun()
+
+# Carregar dados
 dados = api_notion_iterativa()
 
 df_studying = dados['studying_calendar']
