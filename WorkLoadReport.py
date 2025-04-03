@@ -5,6 +5,16 @@ from Functions.API_Notion import API_Notion
 import streamlit as st
 import pandas as pd
 
+# %% ------------------------------------------------------------------------------------------
+# streamlit setup
+st.set_page_config(page_title="Work Load Report", layout="wide")
+st.title('Work Load Report')
+
+# Adicionar botão de atualização
+if st.button('🔄 Atualizar Dados'):
+    st.cache_data.clear()
+    st.rerun()
+
 #%% ------------------------------------------------------------------------------------------
 # lista de urls
 urls = {
@@ -26,25 +36,22 @@ urls = {
 # função para extrair dados do Notion
 @st.cache_data(ttl=300)  # Cache por 5 minutos
 def api_notion_iterativa():
-    dados = {}
-    for calendar_type, config in urls.items():
-        # Extrair dados do Notion
-        df_temp = API_Notion(config['dataset_id'], config['token'])
-        dados[calendar_type] = df_temp
-    
-    return dados
-
-# %% ------------------------------------------------------------------------------------------
-# streamlit
-st.title('Work Load Report')
-
-# Adicionar botão de atualização
-if st.button('🔄 Atualizar Dados'):
-    st.cache_data.clear()
-    st.experimental_rerun()
+    try:
+        dados = {}
+        for calendar_type, config in urls.items():
+            # Extrair dados do Notion
+            df_temp = API_Notion(config['dataset_id'], config['token'])
+            dados[calendar_type] = df_temp
+        return dados
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do Notion: {str(e)}")
+        return None
 
 # Carregar dados
 dados = api_notion_iterativa()
+
+if dados is None:
+    st.stop()
 
 df_studying = dados['studying_calendar']
 df_working = dados['working_calendar']
@@ -110,9 +117,7 @@ pivot_table.index = pivot_table.index.set_levels([
 ])
 
 # %% ------------------------------------------------------------------------------------------
-# streamlit
-st.title('Work Load Report')
-
+# streamlit interface
 # Adicionar filtros no sidebar
 st.sidebar.header('Filtros')
 
