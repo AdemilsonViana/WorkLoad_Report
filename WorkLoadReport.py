@@ -116,6 +116,13 @@ pivot_table.index = pivot_table.index.set_levels([
     pivot_table.index.levels[3].astype(str)   # date
 ])
 
+# Função para formatar o tempo
+def format_time(td):
+    total_hours = td.total_seconds() / 3600
+    hours = int(total_hours)
+    minutes = int((total_hours - hours) * 60)
+    return f"{hours}h {minutes}min"
+
 # %% ------------------------------------------------------------------------------------------
 # streamlit interface
 # Adicionar filtros no sidebar
@@ -144,24 +151,21 @@ if selected_week != 'Todos':
 # Remover a última linha (total) antes de mostrar
 filtered_table_display = filtered_table.iloc[:-1] if len(filtered_table) > 1 else filtered_table
 
+# Formatar a tabela para exibição
+formatted_table = filtered_table_display.copy()
+for col in formatted_table.columns:
+    formatted_table[col] = formatted_table[col].apply(format_time)
+
 # Mostrar a tabela filtrada
 st.dataframe(
-    filtered_table_display,
+    formatted_table,
     use_container_width=True,
     hide_index=False
 )
 
 # Mostrar totais dos dados filtrados
 if len(filtered_table) > 0:
-    st.subheader('Totais do período selecionado:')
     col1, col2, col3 = st.columns(3)
-    
-    # Função para formatar o tempo
-    def format_time(td):
-        total_hours = td.total_seconds() / 3600
-        hours = int(total_hours)
-        minutes = int((total_hours - hours) * 60)
-        return f"{hours}h {minutes}min"
     
     # Calcular os totais somando todas as linhas exceto a última (que já é um total)
     data_for_totals = filtered_table.iloc[:-1] if len(filtered_table) > 1 else filtered_table
@@ -175,4 +179,7 @@ if len(filtered_table) > 0:
     with col3:
         workout_total = data_for_totals['workout'].sum()
         st.metric("Total Workout", format_time(workout_total))
+    
+    total_workload = study_total + work_total + workout_total
+    st.metric("Total Workload", format_time(total_workload))
 # %%
