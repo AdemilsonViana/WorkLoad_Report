@@ -8,16 +8,16 @@ import plotly.express as px
 
 # %% ------------------------------------------------------------------------------------------
 # streamlit setup
-st.set_page_config(page_title="Work Load Report", layout="wide")
-st.title('Work Load Report')
+st.set_page_config(page_title="Workload Report", layout="wide")
+st.title('Workload Report')
 
 # Adicionar botão de atualização
 if st.button('🔄 Atualizar Dados'):
     st.cache_data.clear()
     st.rerun()
 
-#%% ------------------------------------------------------------------------------------------
-# lista de urls
+# %% ------------------------------------------------------------------------------------------
+# Configuração das URLs do Notion
 urls = {
     'studying_calendar': {
         'dataset_id': st.secrets["notion"]["studying_calendar_dataset_id"],
@@ -34,13 +34,32 @@ urls = {
 }
 
 # %% ------------------------------------------------------------------------------------------
-# função para extrair dados do Notion
-@st.cache_data(ttl=300)  # Cache por 5 minutos
+# Funções auxiliares
+def format_time(td):
+    if isinstance(td, pd.Timedelta):
+        total_hours = td.total_seconds() / 3600
+    else:
+        total_hours = td
+    hours = int(total_hours)
+    minutes = int((total_hours - hours) * 60)
+    return f"{hours}h {minutes}min"
+
+def weighted_average(row):
+    weights = {
+        'Segunda': 1, 'Terça': 2, 'Quarta': 3,
+        'Quinta': 4, 'Sexta': 5, 'Sábado': 6, 'Domingo': 7
+    }
+    numerator = sum(row[day] * weight for day, weight in weights.items())
+    denominator = sum(row[day] for day in weights.keys())
+    return round(numerator / denominator, 2)
+
+# %% ------------------------------------------------------------------------------------------
+# Extração de dados do Notion
+@st.cache_data(ttl=300)
 def api_notion_iterativa():
     try:
         dados = {}
         for calendar_type, config in urls.items():
-            # Extrair dados do Notion
             df_temp = API_Notion(config['dataset_id'], config['token'])
             dados[calendar_type] = df_temp
         return dados
@@ -50,152 +69,176 @@ def api_notion_iterativa():
 
 # Carregar dados
 dados = api_notion_iterativa()
-
 if dados is None:
     st.stop()
 
-df_studying = dados['studying_calendar']
-df_working = dados['working_calendar']
-df_workout = dados['workout_calendar']
+# %% ------------------------------------------------------------------------------------------
+# Processamento inicial dos dados
+def process_dataframe(df, tipo):
+    df = df[['properties']]
+    df = pd.json_normalize(df['properties'])
+    df = df[['Date.date.start', 'Date.date.end']]
+    df.rename(columns={'Date.date.start': 'dt_start', 'Date.date.end': 'dt_end'}, inplace=True)
+    
+    df['dt_start'] = pd.to_datetime(df['dt_start'])
+    df['dt_end'] = pd.to_datetime(df['dt_end'])
+    df['duration'] = (df['dt_end'] - df['dt_start']).dt.total_seconds() / 3600
+    
+    df['type'] = tipo
+    df['date'] = df['dt_start'].dt.strftime('%d/%m/%Y')
+    df['year'] = df['dt_start'].dt.year
+    df['month'] = df['dt_start'].dt.month
+    df['week'] = df['dt_start'].dt.isocalendar().week
+    df['weekday'] = df['dt_start'].dt.dayofweek + 1
+    
+    return df
+
+# Processar cada dataframe
+dfs = {tipo: process_dataframe(df, tipo) for tipo, df in dados.items()}
+df_workload = pd.concat(dfs.values())
 
 # %% ------------------------------------------------------------------------------------------
-# handeling
-dfs = {
-    'studying': df_studying,
-    'working': df_working,
-    'workout': df_workout
+# Criação das tabelas pivot
+# Tabela pivot semanal
+weekday_names = {
+    1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta',
+    5: 'Sexta', 6: 'Sábado', 7: 'Domingo'
 }
 
-for tipo, df in dfs.items():
-    dfs[tipo] = df[['properties']]
-    dfs[tipo] = pd.json_normalize(dfs[tipo]['properties'])
-    dfs[tipo] = dfs[tipo][['Date.date.start', 'Date.date.end']]
-    dfs[tipo].rename(columns={'Date.date.start': 'dt_start', 'Date.date.end': 'dt_end'}, inplace=True)
-    dfs[tipo]['dt_start'] = pd.to_datetime(dfs[tipo]['dt_start'])
-    dfs[tipo]['dt_end'] = pd.to_datetime(dfs[tipo]['dt_end'])
+weekday_pivot = pd.pivot_table(
+    df_workload,
+    values='duration',
+    index=['year', 'week'],
+    columns='weekday',
+    aggfunc='sum',
+    fill_value=0
+).rename(columns=weekday_names)
 
-    dfs[tipo]['duration'] = dfs[tipo]['dt_end'] - dfs[tipo]['dt_start']
-    dfs[tipo]['duration'] = dfs[tipo]['duration'].dt.total_seconds() / 3600  # converte para horas
-    dfs[tipo]['type'] = tipo
+# Adicionar métricas à tabela pivot semanal
+weekday_pivot['Média'] = weekday_pivot.mean(axis=1)
+weekday_pivot['Média Ponderada'] = weekday_pivot.apply(weighted_average, axis=1)
+weekday_pivot['Min - Max'] = (
+    weekday_pivot[list(weekday_names.values())].max(axis=1) - 
+    weekday_pivot[list(weekday_names.values())].min(axis=1)
+)
 
-    dfs[tipo]['date'] = dfs[tipo]['dt_start'].dt.strftime('%d/%m/%Y')
-    dfs[tipo]['year'] = dfs[tipo]['dt_start'].dt.year
-    dfs[tipo]['month'] = dfs[tipo]['dt_start'].dt.month
-    dfs[tipo]['week'] = dfs[tipo]['dt_start'].dt.isocalendar().week
-
-# Atualizar as variáveis originais
-df_studying = dfs['studying']
-df_working = dfs['working']
-df_workout = dfs['workout']
-
-# %% ------------------------------------------------------------------------------------------
-# handeling 2
-# juntar os dados
-df_workload = pd.concat([df_studying, df_working, df_workout])
-
-# Criar a tabela dinâmica
+# Tabela pivot detalhada
 pivot_table = pd.pivot_table(
     df_workload,
     values='duration',
     index=['year', 'month', 'week', 'date'],
     columns='type',
     aggfunc='sum',
-    fill_value=0,
-    margins=True,
-    margins_name='Grand Total'
+    fill_value=0
 )
 
-# Converter as colunas para timedelta
+# Adicionar a coluna Grand Total sem criar a linha
+pivot_table['Grand Total'] = pivot_table.sum(axis=1)
+
+# Converter para timedelta
 for col in pivot_table.columns:
     pivot_table[col] = pd.to_timedelta(pivot_table[col], unit='h')
 
-# Converter os índices para string para evitar problemas de tipo
+# Converter índices para string
 pivot_table.index = pivot_table.index.set_levels([
-    pivot_table.index.levels[0].astype(str),  # year
-    pivot_table.index.levels[1].astype(str),  # month
-    pivot_table.index.levels[2].astype(str),  # week
-    pivot_table.index.levels[3].astype(str)   # date
+    pivot_table.index.levels[0].astype(str),
+    pivot_table.index.levels[1].astype(str),
+    pivot_table.index.levels[2].astype(str),
+    pivot_table.index.levels[3].astype(str)
 ])
 
-# Função para formatar o tempo
-def format_time(td):
-    total_hours = td.total_seconds() / 3600
-    hours = int(total_hours)
-    minutes = int((total_hours - hours) * 60)
-    return f"{hours}h {minutes}min"
-
 # %% ------------------------------------------------------------------------------------------
-# streamlit interface
-# Adicionar filtros no sidebar
-st.sidebar.header('Filtros')
+# Interface Streamlit - Filtros
+st.sidebar.header('Filters')
 
-# Adicionar seletor de período
-time_period = st.sidebar.selectbox(
-    'Agrupar por',
-    ['date', 'week', 'month', 'year']
-)
-
-# Obter valores únicos para os filtros
 years = sorted(pivot_table.index.get_level_values('year').unique())
 months = sorted(pivot_table.index.get_level_values('month').unique())
 weeks = sorted(pivot_table.index.get_level_values('week').unique())
 
-# Criar os filtros
-selected_year = st.sidebar.selectbox('Ano', ['Todos'] + list(years))
-selected_month = st.sidebar.selectbox('Mês', ['Todos'] + list(months))
-selected_week = st.sidebar.selectbox('Semana', ['Todos'] + list(weeks))
+selected_year = st.sidebar.selectbox('Year', ['All'] + list(years))
+selected_month = st.sidebar.selectbox('Month', ['All'] + list(months))
+selected_weeks = st.sidebar.multiselect('Weeks', weeks, default=None)
 
-# Aplicar filtros
+# Aplicação dos filtros
+# Filtrar tabela semanal
+filtered_weekday_pivot = weekday_pivot.copy()
+if selected_year != 'All':
+    filtered_weekday_pivot = filtered_weekday_pivot[
+        filtered_weekday_pivot.index.get_level_values('year').astype(str) == selected_year
+    ]
+if selected_weeks:
+    filtered_weekday_pivot = filtered_weekday_pivot[
+        filtered_weekday_pivot.index.get_level_values('week').astype(str).isin(selected_weeks)
+    ]
+
+# Filtrar tabela detalhada
 filtered_table = pivot_table.copy()
-
-if selected_year != 'Todos':
+if selected_year != 'All':
     filtered_table = filtered_table[filtered_table.index.get_level_values('year') == selected_year]
-if selected_month != 'Todos':
-    filtered_table = filtered_table[filtered_table.index.get_level_values('month') == selected_month]
-if selected_week != 'Todos':
-    filtered_table = filtered_table[filtered_table.index.get_level_values('week') == selected_week]
+if selected_month != 'All':
+    filtered_table = filtered_table[
+        filtered_table.index.get_level_values('month').astype(str) == str(selected_month)
+    ]
+if selected_weeks:
+    filtered_table = filtered_table[filtered_table.index.get_level_values('week').astype(str).isin(selected_weeks)]
 
-# Remover a última linha (total) antes de mostrar
-filtered_table_display = filtered_table.iloc[:-1] if len(filtered_table) > 1 else filtered_table
+# Após aplicar todos os filtros, ordenar por data
+filtered_table = filtered_table.sort_index(ascending=False)
 
-# níveis do índice em função do período selecionado
-if time_period == 'year':
-    filtered_table_display = filtered_table_display.groupby(level='year').sum()
-elif time_period == 'month':
-    filtered_table_display = filtered_table_display.groupby(level=['month']).sum()
-elif time_period == 'week':
-    filtered_table_display = filtered_table_display.groupby(level=['week']).sum()
-
-# Mostrar totais dos dados filtrados
+# %% ------------------------------------------------------------------------------------------
+# Layout
+# Detailed table com seletor entre os cartões e a tabela
+st.subheader('Workload distribution')
+# Métricas totais
 if len(filtered_table) > 0:
     col1, col2, col3, col4 = st.columns(4)
-    
-    # Calcular os totais somando todas as linhas exceto a última (que já é um total)
-    data_for_totals = filtered_table.iloc[:-1] if len(filtered_table) > 1 else filtered_table
+    data_for_totals = filtered_table
     
     with col1:
-        study_total = data_for_totals['studying'].sum()
+        study_total = data_for_totals['studying_calendar'].sum()
         st.metric("Total Studying", format_time(study_total))
     with col2:
-        work_total = data_for_totals['working'].sum()
+        work_total = data_for_totals['working_calendar'].sum()
         st.metric("Total Working", format_time(work_total))
     with col3:
-        workout_total = data_for_totals['workout'].sum()
+        workout_total = data_for_totals['workout_calendar'].sum()
         st.metric("Total Workout", format_time(workout_total))
     with col4:
         total_workload = study_total + work_total + workout_total
         st.metric("Total Workload", format_time(total_workload))
 
-# Formatar a tabela para exibição
+# Mover o seletor para aqui, antes do processamento da tabela
+time_period = st.selectbox('Agrupar por', ['date', 'week', 'month', 'year'])
+
+# Preparar tabela detalhada
+filtered_table_display = filtered_table
+
+# Agrupar por período selecionado
+if time_period == 'year':
+    filtered_table_display = filtered_table_display.groupby(level='year').sum().sort_index(ascending=False)
+elif time_period == 'month':
+    filtered_table_display = filtered_table_display.groupby(level=['year', 'month']).sum().sort_index(ascending=False)
+elif time_period == 'week':
+    filtered_table_display = filtered_table_display.groupby(level=['year', 'week']).sum().sort_index(ascending=False)
+# Se for 'date', já está ordenado pelo sort_index anterior
+
+# Formatar tabela detalhada
 formatted_table = filtered_table_display.copy()
 for col in formatted_table.columns:
     formatted_table[col] = formatted_table[col].apply(format_time)
 
-# Mostrar a tabela filtrada
-st.subheader('Tabela Detalhada')
-st.dataframe(
-    formatted_table,
-    use_container_width=True,
-    hide_index=False
-)
-# %%
+# Mostrar a tabela detalhada
+st.dataframe(formatted_table, use_container_width=True, hide_index=False)
+
+# Workload weekly distribution por último
+st.subheader('Workload weekly distribution')
+st.dataframe(filtered_weekday_pivot, use_container_width=True, hide_index=False)
+# legenda
+st.markdown('''
+**Mesures**
+* **Média**: Principal métrica de comparação entre as semanas
+* **Média ponderada**: Métrica de alálise de distribuição, quando mais perto de 4 mais bem equilibrada está a distribuição.
+    * A média ponderada buscada é entre **3.5** e **4**, considerando o descanço aos fins de semana.
+* **Min - Max**: Também undica a distribuição, quando menor melhor foi a distribuição.
+''')
+
