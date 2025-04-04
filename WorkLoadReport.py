@@ -49,9 +49,14 @@ def weighted_average(row):
         'Segunda': 1, 'Terça': 2, 'Quarta': 3,
         'Quinta': 4, 'Sexta': 5, 'Sábado': 6, 'Domingo': 7
     }
-    numerator = sum(row[day] * weight for day, weight in weights.items())
-    denominator = sum(row[day] for day in weights.keys())
-    return round(numerator / denominator, 2)
+    
+    # Usar apenas os dias disponíveis
+    available_weights = {day: weights[day] for day in available_days}
+    
+    numerator = sum(row[day] * available_weights[day] for day in available_days)
+    denominator = sum(row[day] for day in available_days)
+    
+    return round(numerator / denominator, 2) if denominator != 0 else 0
 
 # %% ------------------------------------------------------------------------------------------
 # Extração de dados do Notion
@@ -115,11 +120,28 @@ weekday_pivot = pd.pivot_table(
 ).rename(columns=weekday_names)
 
 # Adicionar métricas à tabela pivot semanal
-weekday_pivot['Média'] = weekday_pivot.mean(axis=1)
-weekday_pivot['Média Ponderada'] = weekday_pivot.apply(weighted_average, axis=1)
+# Primeiro, garantir que estamos usando apenas as colunas que existem
+available_days = [day for day in weekday_names.values() if day in weekday_pivot.columns]
+weekday_pivot['Média'] = weekday_pivot[available_days].mean(axis=1)
+
+def weighted_average(row):
+    weights = {
+        'Segunda': 1, 'Terça': 2, 'Quarta': 3,
+        'Quinta': 4, 'Sexta': 5, 'Sábado': 6, 'Domingo': 7
+    }
+    
+    # Usar apenas os dias disponíveis
+    available_weights = {day: weights[day] for day in available_days}
+    
+    numerator = sum(row[day] * available_weights[day] for day in available_days)
+    denominator = sum(row[day] for day in available_days)
+    
+    return round(numerator / denominator, 2) if denominator != 0 else 0
+
+weekday_pivot['Média Ponderada'] = weekday_pivot[available_days].apply(weighted_average, axis=1)
 weekday_pivot['Min - Max'] = (
-    weekday_pivot[list(weekday_names.values())].max(axis=1) - 
-    weekday_pivot[list(weekday_names.values())].min(axis=1)
+    weekday_pivot[available_days].max(axis=1) - 
+    weekday_pivot[available_days].min(axis=1)
 )
 
 # Tabela pivot detalhada
