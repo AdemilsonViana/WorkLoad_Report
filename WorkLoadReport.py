@@ -1,7 +1,8 @@
 # %% ------------------------------------------------------------------------------------------
 # imports
 #streamlit run WorkLoadReport.py
-from Functions.API_Notion import API_Notion
+from Functions.APIs.notion import api_notion_iterativa
+from Functions.Utils.data_processing import format_time
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -34,61 +35,37 @@ urls = {
 }
 
 # %% ------------------------------------------------------------------------------------------
-# Funções auxiliares
-def format_time(td):
-    if isinstance(td, pd.Timedelta):
-        total_hours = td.total_seconds() / 3600
-    else:
-        total_hours = td
-    hours = int(total_hours)
-    minutes = int((total_hours - hours) * 60)
-    return f"{hours}h {minutes}min"
-
-def weighted_average(row):
-    weights = {
-        'Segunda': 1, 'Terça': 2, 'Quarta': 3,
-        'Quinta': 4, 'Sexta': 5, 'Sábado': 6, 'Domingo': 7
-    }
-    
-    # Usar apenas os dias disponíveis
-    available_weights = {day: weights[day] for day in available_days}
-    
-    numerator = sum(row[day] * available_weights[day] for day in available_days)
-    denominator = sum(row[day] for day in available_days)
-    
-    return round(numerator / denominator, 2) if denominator != 0 else 0
-
-# %% ------------------------------------------------------------------------------------------
 # Extração de dados do Notion
+# O decorador @st.cache_data armazena os resultados da função por 5 minutos (300 segundos)
+# Isso evita chamadas desnecessárias à API do Notion e melhora a performance
 @st.cache_data(ttl=300)
-def api_notion_iterativa():
-    try:
-        dados = {}
-        for calendar_type, config in urls.items():
-            df_temp = API_Notion(config['dataset_id'], config['token'])
-            dados[calendar_type] = df_temp
-        return dados
-    except Exception as e:
-        st.error(f"Erro ao carregar dados do Notion: {str(e)}")
-        return None
+def load_notion_data():
+    # Esta função encapsula a chamada à API do Notion
+    # O parâmetro 'urls' contém as configurações necessárias para cada calendário
+    return api_notion_iterativa(urls)
 
-# Carregar dados
-dados = api_notion_iterativa()
+# Carregar os dados usando a função cacheada
+dados = load_notion_data()
 if dados is None:
     st.stop()
 
 # %% ------------------------------------------------------------------------------------------
 # Processamento inicial dos dados
-def process_dataframe(df, tipo):
+# Processar cada dataframe
+dfs = {}
+for tipo, df in dados.items():
+    # Extrair e normalizar os dados
     df = df[['properties']]
     df = pd.json_normalize(df['properties'])
     df = df[['Date.date.start', 'Date.date.end']]
     df.rename(columns={'Date.date.start': 'dt_start', 'Date.date.end': 'dt_end'}, inplace=True)
     
+    # Converter para datetime e calcular duração
     df['dt_start'] = pd.to_datetime(df['dt_start'])
     df['dt_end'] = pd.to_datetime(df['dt_end'])
     df['duration'] = (df['dt_end'] - df['dt_start']).dt.total_seconds() / 3600
     
+    # Adicionar colunas de tempo
     df['type'] = tipo
     df['date'] = df['dt_start'].dt.strftime('%d/%m/%Y')
     df['year'] = df['dt_start'].dt.year
@@ -96,10 +73,8 @@ def process_dataframe(df, tipo):
     df['week'] = df['dt_start'].dt.isocalendar().week
     df['weekday'] = df['dt_start'].dt.dayofweek + 1
     
-    return df
+    dfs[tipo] = df
 
-# Processar cada dataframe
-dfs = {tipo: process_dataframe(df, tipo) for tipo, df in dados.items()}
 df_workload = pd.concat(dfs.values())
 
 # %% ------------------------------------------------------------------------------------------
@@ -117,32 +92,26 @@ weekday_pivot = pd.pivot_table(
     columns='weekday',
     aggfunc='sum',
     fill_value=0
-).rename(columns=weekday_names)
+)
 
 # Adicionar métricas à tabela pivot semanal
 # Primeiro, garantir que estamos usando apenas as colunas que existem
-available_days = [day for day in weekday_names.values() if day in weekday_pivot.columns]
-weekday_pivot['Média'] = weekday_pivot[available_days].mean(axis=1)
+available_numbers = [num for num in range(1, 8) if num in weekday_pivot.columns]
+weekday_pivot['Média'] = weekday_pivot[available_numbers].mean(axis=1)
 
-def weighted_average(row):
-    weights = {
-        'Segunda': 1, 'Terça': 2, 'Quarta': 3,
-        'Quinta': 4, 'Sexta': 5, 'Sábado': 6, 'Domingo': 7
-    }
-    
-    # Usar apenas os dias disponíveis
-    available_weights = {day: weights[day] for day in available_days}
-    
-    numerator = sum(row[day] * available_weights[day] for day in available_days)
-    denominator = sum(row[day] for day in available_days)
-    
-    return round(numerator / denominator, 2) if denominator != 0 else 0
+# Calcular média ponderada diretamente usando os números dos dias
+weekday_pivot['Média Ponderada'] = (
+    weekday_pivot[available_numbers].multiply(available_numbers).sum(axis=1) / 
+    weekday_pivot[available_numbers].sum(axis=1)
+).round(2)
 
-weekday_pivot['Média Ponderada'] = weekday_pivot[available_days].apply(weighted_average, axis=1)
 weekday_pivot['Min - Max'] = (
-    weekday_pivot[available_days].max(axis=1) - 
-    weekday_pivot[available_days].min(axis=1)
+    weekday_pivot[available_numbers].max(axis=1) - 
+    weekday_pivot[available_numbers].min(axis=1)
 )
+
+# Renomear as colunas dos dias para os nomes em português
+weekday_pivot = weekday_pivot.rename(columns=weekday_names)
 
 # Tabela pivot detalhada
 pivot_table = pd.pivot_table(
