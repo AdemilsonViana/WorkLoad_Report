@@ -44,3 +44,9 @@ def remover_acentos(texto):
     if isinstance(texto, str):
         return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
     return texto
+
+# remover linhas em branco
+import pandas as pd
+def remover_linhas_em_banco(df):
+    df.dropna(how='all')
+    return df
