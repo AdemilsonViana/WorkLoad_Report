@@ -2,7 +2,7 @@
 # imports
 #streamlit run WorkLoadReport.py
 from Functions.APIs.notion import api_notion_iterativa
-from Functions.Utils.data_processing import format_time
+from Functions.data_processing.data_processing import format_time
 import streamlit as st
 import pandas as pd
 import plotly.express as px
