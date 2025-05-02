@@ -79,39 +79,6 @@ df_workload = pd.concat(dfs.values())
 
 # %% ------------------------------------------------------------------------------------------
 # Criação das tabelas pivot
-# Tabela pivot semanal
-weekday_names = {
-    1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta',
-    5: 'Sexta', 6: 'Sábado', 7: 'Domingo'
-}
-
-weekday_pivot = pd.pivot_table(
-    df_workload,
-    values='duration',
-    index=['year', 'week'],
-    columns='weekday',
-    aggfunc='sum',
-    fill_value=0
-)
-
-# Adicionar métricas à tabela pivot semanal
-# Primeiro, garantir que estamos usando apenas as colunas que existem
-available_numbers = [num for num in range(1, 8) if num in weekday_pivot.columns]
-weekday_pivot['Média'] = weekday_pivot[available_numbers].mean(axis=1)
-
-# Calcular média ponderada diretamente usando os números dos dias
-weekday_pivot['Média Ponderada'] = (
-    weekday_pivot[available_numbers].multiply(available_numbers).sum(axis=1) / 
-    weekday_pivot[available_numbers].sum(axis=1)
-).round(2)
-
-weekday_pivot['Min - Max'] = (
-    weekday_pivot[available_numbers].max(axis=1) - 
-    weekday_pivot[available_numbers].min(axis=1)
-)
-
-# Renomear as colunas dos dias para os nomes em português
-weekday_pivot = weekday_pivot.rename(columns=weekday_names)
 
 # Tabela pivot detalhada
 pivot_table = pd.pivot_table(
@@ -122,14 +89,21 @@ pivot_table = pd.pivot_table(
     aggfunc='sum',
     fill_value=0
 )
-
 # Adicionar a coluna Grand Total sem criar a linha
 pivot_table['Grand Total'] = pivot_table.sum(axis=1)
-
+# Adicionar coluna de carda de trabalho acumulada
+pivot_table = pivot_table.reset_index()
+pivot_table['avg accumulated workload'] = (
+    pivot_table['Grand Total']
+        .shift(1)
+        .rolling(window=14, min_periods=1)
+        .mean().round(2)
+)
+pivot_table = pivot_table.set_index(['year', 'month', 'week', 'date'])
+pivot_table['avg accumulated workload'] = pivot_table['avg accumulated workload'].fillna(0) # null to 0
 # Converter para timedelta
 for col in pivot_table.columns:
     pivot_table[col] = pd.to_timedelta(pivot_table[col], unit='h')
-
 # Converter índices para string
 pivot_table.index = pivot_table.index.set_levels([
     pivot_table.index.levels[0].astype(str),
@@ -137,6 +111,35 @@ pivot_table.index = pivot_table.index.set_levels([
     pivot_table.index.levels[2].astype(str),
     pivot_table.index.levels[3].astype(str)
 ])
+
+# Tabela pivot semanal
+weekday_names = {
+    1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta',
+    5: 'Sexta', 6: 'Sábado', 7: 'Domingo'
+}
+weekday_pivot = pd.pivot_table(
+    df_workload,
+    values='duration',
+    index=['year', 'week'],
+    columns='weekday',
+    aggfunc='sum',
+    fill_value=0
+)
+# Adicionar métricas à tabela pivot semanal
+available_numbers = [num for num in range(1, 8) if num in weekday_pivot.columns]
+weekday_pivot['Média'] = weekday_pivot[available_numbers].mean(axis=1)
+# Calcular média ponderada diretamente usando os números dos dias
+weekday_pivot['Média Ponderada'] = (
+    weekday_pivot[available_numbers].multiply(available_numbers).sum(axis=1) / 
+    weekday_pivot[available_numbers].sum(axis=1)
+).round(2)
+
+weekday_pivot['Min - Max'] = (
+    weekday_pivot[available_numbers].max(axis=1) - 
+    weekday_pivot[available_numbers].min(axis=1)
+)
+# Renomear as colunas dos dias para os nomes em português
+weekday_pivot = weekday_pivot.rename(columns=weekday_names)
 
 # %% ------------------------------------------------------------------------------------------
 # Interface Streamlit - Filtros
