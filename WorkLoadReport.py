@@ -27,10 +27,6 @@ urls = {
     'working_calendar': {
         'dataset_id': st.secrets["notion"]["working_calendar_dataset_id"],
         'token': st.secrets["notion"]["working_calendar_token"]
-    },
-    'workout_calendar': {
-        'dataset_id': st.secrets["notion"]["workout_calendar_dataset_id"],
-        'token': st.secrets["notion"]["workout_calendar_token"]
     }
 }
 
@@ -91,11 +87,11 @@ pivot_table = pd.pivot_table(
 )
 # Adicionar a coluna Grand Total sem criar a linha
 pivot_table['Grand Total'] = pivot_table.sum(axis=1)
-# Adicionar coluna de carda de trabalho acumulada
+# Adicionar coluna de carca de trabalho acumulada
 pivot_table = pivot_table.reset_index()
 pivot_table['avg accumulated workload'] = (
     pivot_table['Grand Total']
-        .shift(1)
+        # .shift(1)
         .rolling(window=14, min_periods=1)
         .mean().round(2)
 )
@@ -185,7 +181,7 @@ filtered_table = filtered_table.sort_index(ascending=False)
 st.subheader('Workload distribution')
 # Métricas totais
 if len(filtered_table) > 0:
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     data_for_totals = filtered_table
     
     with col1:
@@ -195,10 +191,7 @@ if len(filtered_table) > 0:
         work_total = data_for_totals['working_calendar'].sum()
         st.metric("Total Working", format_time(work_total))
     with col3:
-        workout_total = data_for_totals['workout_calendar'].sum()
-        st.metric("Total Workout", format_time(workout_total))
-    with col4:
-        total_workload = study_total + work_total + workout_total
+        total_workload = study_total + work_total
         st.metric("Total Workload", format_time(total_workload))
 
 # Mover o seletor para aqui, antes do processamento da tabela
